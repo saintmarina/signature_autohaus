@@ -1,0 +1,11 @@
+.env
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+
+# Large/data files
+*.xlsx
+*.csv
+
+# Optional
+.DS_Store
