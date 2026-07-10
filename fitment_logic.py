@@ -236,10 +236,6 @@ def save_custom_fitments(custom_fitment_df, custom_fitment_file, missing_custom_
 
     custom_fitment_df.to_excel(custom_fitment_file, index=False)
 
-    print(
-        f"Saved {len(new_rows)} custom fitment(s) for SKU {new_rows.iloc[0]['SKU']}"
-    )
-
     return custom_fitment_df
 
 def compress_fitment_years(metadata_rows):
@@ -344,11 +340,13 @@ def resolve_vehicle_fitments_to_metadata(
     Returns:
         metadata_rows,
         custom_fitment_df,
-        fitment_review_notes
+        fitment_review_notes,
+        created_custom_fitments
     """
 
     all_metadata_rows = []
     fitment_review_notes = []
+    all_created_custom_fitments = []
 
     for vf in vehicle_fitments:
         start_year = int(vf["start_year"])
@@ -414,9 +412,10 @@ def resolve_vehicle_fitments_to_metadata(
         )
 
         all_metadata_rows.extend(metadata_rows)
+        all_created_custom_fitments.extend(missing_custom_fitments)
 
     all_metadata_rows = sorted(set(all_metadata_rows))
-    return all_metadata_rows, custom_fitment_df, fitment_review_notes
+    return (all_metadata_rows, custom_fitment_df, fitment_review_notes, all_created_custom_fitments)
 
 def get_generic_fitment_review_reason(start_year, end_year, make, model, submodel):
     """

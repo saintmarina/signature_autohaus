@@ -146,3 +146,191 @@ def build_product_input(row):
         ),
         "price": 0 if pd.isna(row["Variant Price"]) else float(row["Variant Price"]),
     }
+
+def build_review_notes(
+    ai,
+    fitment_review_notes,
+    final_metadata,
+):
+    """
+    Combines AI review reasons and fitment review reasons,
+    adds internal consistency checks, and filters ignored reasons.
+
+    Returns:
+        review_notes,
+        ignored_review_notes
+    """
+
+    review_notes = []
+
+    if ai.get("review_required"):
+        review_notes.extend(ai.get("review_reasons", []))
+
+    review_notes.extend(fitment_review_notes)
+
+    # This should never happen.
+    if (
+        ai.get("convermax_universal") is not True
+        and ai.get("vehicle_fitments")
+        and not final_metadata
+        and not fitment_review_notes
+    ):
+        review_notes.append(
+            "fitment_metadata_empty_for_vehicle_specific_product"
+        )
+
+    return filter_review_notes(review_notes)
+
+def filter_review_notes(review_notes):
+    """
+    Removes ignored review notes.
+    Returns:
+        filtered_review_notes,
+        ignored_review_notes
+    """
+
+    ignored_review_reasons = {
+        "title_price_description_scope_conflict",
+        "vehicle_fitment_submodel_unclear",
+        "vehicle_fitment_submodel_ambiguous",
+        "weight_low_confidence",
+        "fitment_year_conflict",
+    }
+
+    ignored_review_reason_prefixes = (
+        "fitment_conflict",
+    )
+
+    filtered = []
+    ignored = []
+
+    for note in sorted(set(review_notes)):
+        if (
+            note in ignored_review_reasons
+            or any(note.startswith(prefix) for prefix in ignored_review_reason_prefixes)
+        ):
+            ignored.append(note)
+        else:
+            filtered.append(note)
+
+    return filtered, ignored
+
+def print_product_summary(
+    *,
+    debug,
+    row_index,
+    original_row,
+    ai,
+    final_metadata,
+    fitment_tag,
+    review_notes,
+    ignored_review_notes,
+    created_custom_fitments,
+    title_col,
+    type_col,
+    weight_col,
+):
+    """
+    Prints processing information for one product.
+
+    When debug=True:
+        Prints the full product summary.
+
+    When debug=False:
+        Prints products that created custom fitments
+        or produced a no-fitment review reason.
+    """
+
+    if debug:
+        print("\n" + "=" * 100)
+        print(f"ROW: {row_index}")
+        print(f"ID: {original_row['ID']}")
+        print(f"SKU: {original_row['Variant SKU']}")
+        print(f"OLD TITLE: {original_row[title_col]}")
+        print(f"NEW TITLE: {ai.get('title', original_row[title_col])}")
+        print(f"TYPE: {ai.get('type', original_row[type_col])}")
+        print(f"COLLECTIONS: {', '.join(ai.get('custom_collections', []))}")
+        print(f"WEIGHT: {ai.get('variant_weight', original_row[weight_col])}")
+        print(f"METADATA: {final_metadata}")
+        print(f"FITMENT TAG: {fitment_tag}")
+
+        if ai.get("review_required"):
+            print(f"AI REVIEW REASONS: {ai.get('review_reasons', [])}")
+
+        if review_notes:
+            print(f"REVIEW REASONS: {review_notes}")
+
+        if ignored_review_notes:
+            print(f"IGNORED REVIEW REASONS: {ignored_review_notes}")
+
+    else:
+        no_fitment_review_notes = [
+            note
+            for note in review_notes
+            if note.startswith("No fitment found:")
+        ]
+
+        if created_custom_fitments or no_fitment_review_notes:
+            print("\n" + "=" * 100)
+
+            if created_custom_fitments:
+                print(f"CUSTOM FITMENT CREATED FOR ROW: {row_index}")
+
+            if no_fitment_review_notes:
+                print(f"NO FITMENT FOUND FOR ROW: {row_index}")
+
+            print(f"SKU: {original_row['Variant SKU']}")
+            print("AI RESPONSE:")
+            print(json.dumps(ai, indent=2, ensure_ascii=False))
+
+            if no_fitment_review_notes:
+                print(f"REVIEW REASONS: {no_fitment_review_notes}")
+
+            print(f"METADATA: {final_metadata}")
+
+
+def update_product_row(
+    *,
+    df,
+    row_index,
+    original_row,
+    ai,
+    review_notes,
+    fitment_tag,
+    final_metadata,
+    review_col,
+    command_col,
+    tags_command_col,
+    variant_command_col,
+    title_col,
+    type_col,
+    tags_col,
+    collections_col,
+    weight_col,
+    fitment_col,
+    universal_col,
+):
+    """
+    Updates one product row with AI enrichment and fitment results.
+    """
+
+    existing_tags = [
+        tag
+        for tag in parse_tags(original_row[tags_col])
+        if not tag.startswith("fits_")
+    ]
+
+    if fitment_tag:
+        existing_tags.append(fitment_tag)
+
+    df.at[row_index, review_col] = (" | ".join(review_notes) if review_notes else None)
+    df.at[row_index, command_col] = "MERGE"
+    df.at[row_index, tags_command_col] = "REPLACE"
+    df.at[row_index, variant_command_col] = "MERGE"
+    df.at[row_index, title_col] = ai.get("title", original_row[title_col])
+    df.at[row_index, type_col] = ai.get("type", original_row[type_col])
+    df.at[row_index, tags_col] = format_tags(existing_tags)
+    df.at[row_index, collections_col] = ", ".join(ai.get("custom_collections", []))
+    df.at[row_index, weight_col] = ai.get("variant_weight", original_row[weight_col])
+    df.at[row_index, fitment_col] = json.dumps(final_metadata, ensure_ascii=False)
+    df.at[row_index, universal_col] = ("Yes" if ai.get("convermax_universal") is True else None)
