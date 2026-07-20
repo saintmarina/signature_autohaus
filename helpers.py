@@ -6,6 +6,8 @@ from openai import RateLimitError
 import time
 import json
 import pandas as pd
+import math
+import fitment_logic
 
 def pixels_to_excel_width(px):
     return px / 7
@@ -331,6 +333,103 @@ def update_product_row(
     df.at[row_index, type_col] = ai.get("type", original_row[type_col])
     df.at[row_index, tags_col] = format_tags(existing_tags)
     df.at[row_index, collections_col] = ", ".join(ai.get("custom_collections", []))
-    df.at[row_index, weight_col] = ai.get("variant_weight", original_row[weight_col])
+    
+    weight = ai.get("variant_weight", original_row[weight_col])
+    if pd.notna(weight):
+        weight = math.ceil(float(weight))
+    df.at[row_index, weight_col] = weight
+
     df.at[row_index, fitment_col] = json.dumps(final_metadata, ensure_ascii=False)
     df.at[row_index, universal_col] = ("Yes" if ai.get("convermax_universal") is True else None)
+
+
+def manually_resolve_fitments(
+    *,
+    df,
+    fitment_df,
+    custom_fitment_df,
+    custom_fitment_file,
+    row_index,
+    manual_fitments,
+    ai_result,
+    review_col,
+    command_col,
+    tags_command_col,
+    variant_command_col,
+    title_col,
+    type_col,
+    tags_col,
+    collections_col,
+    weight_col,
+    fitment_col,
+    universal_col,
+    debug,
+):
+    """
+    Manually resolves fitments for a single product.
+    """
+    original_row = df.loc[row_index]
+
+    (
+        final_metadata,
+        custom_fitment_df,
+        fitment_review_notes,
+        created_custom_fitments,
+    ) = fitment_logic.resolve_vehicle_fitments_to_metadata(
+        fitment_df=fitment_df,
+        vehicle_fitments=manual_fitments,
+        custom_fitment_df=custom_fitment_df,
+        custom_fitment_file=custom_fitment_file,
+        product_row=original_row,
+    )
+
+    fitment_tag = fitment_logic.metadata_to_fitment_tag(final_metadata)
+
+    review_notes, ignored_review_notes = build_review_notes(
+        ai_result,
+        fitment_review_notes,
+        final_metadata,
+    )
+
+    update_product_row(
+        df=df,
+        row_index=row_index,
+        original_row=original_row,
+        ai=ai_result,
+        review_notes=review_notes,
+        fitment_tag=fitment_tag,
+        final_metadata=final_metadata,
+        review_col=review_col,
+        command_col=command_col,
+        tags_command_col=tags_command_col,
+        variant_command_col=variant_command_col,
+        title_col=title_col,
+        type_col=type_col,
+        tags_col=tags_col,
+        collections_col=collections_col,
+        weight_col=weight_col,
+        fitment_col=fitment_col,
+        universal_col=universal_col,
+    )
+
+    print_product_summary(
+        debug=debug,
+        row_index=row_index,
+        original_row=original_row,
+        ai=ai_result,
+        final_metadata=final_metadata,
+        fitment_tag=fitment_tag,
+        review_notes=review_notes,
+        ignored_review_notes=ignored_review_notes,
+        created_custom_fitments=created_custom_fitments,
+        title_col=title_col,
+        type_col=type_col,
+        weight_col=weight_col,
+    )
+
+    return (
+        custom_fitment_df,
+        final_metadata,
+        fitment_tag,
+        created_custom_fitments,
+    )

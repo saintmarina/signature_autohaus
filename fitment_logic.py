@@ -513,17 +513,45 @@ def get_matching_custom_fitment_rows(custom_fitment_df, start_year, end_year, ma
 
     return pd.DataFrame(rows, columns=["year", "make", "model", "submodel"])
 
-def metadata_to_fitment_tag(metadata_rows):
+def metadata_to_fitment_tag(metadata_rows, max_tag_length=255):
     """
-    Converts compressed Convermax metadata rows into one Shopify fitment tag.
-    Example: ["2019-2021|BMW|M340i|Base"]
-    Returns: fits_2019-2021`BMW`M340i`Base
+    Returns one or more comma-separated Shopify fitment tags.
+    Every individual tag is at most 255 characters.
     """
 
     if not metadata_rows:
         return ""
 
-    return "fits_" + "~".join(row.replace("|", "`") for row in metadata_rows)
+    converted_rows = [
+        row.replace("|", "`")
+        for row in metadata_rows
+    ]
+
+    tags = []
+    current_rows = []
+
+    for row in converted_rows:
+        single_tag = f"fits_{row}"
+
+        if len(single_tag) > max_tag_length:
+            raise ValueError(
+                f"Individual fitment exceeds Shopify's "
+                f"{max_tag_length}-character limit "
+                f"({len(single_tag)} characters): {row}"
+            )
+
+        candidate = "fits_" + "~".join(current_rows + [row])
+
+        if len(candidate) <= max_tag_length:
+            current_rows.append(row)
+        else:
+            tags.append("fits_" + "~".join(current_rows))
+            current_rows = [row]
+
+    if current_rows:
+        tags.append("fits_" + "~".join(current_rows))
+
+    return ", ".join(tags)
 
 def filter_review_notes(review_notes):
     """
